@@ -1,0 +1,6 @@
+{
+  "appId": "com.college.ytmanager",
+  "appName": "YT Manager",
+  "webDir": "dist",
+  "server": { "androidScheme": "http", "cleartext": true }
+}

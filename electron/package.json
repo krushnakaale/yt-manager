@@ -1,0 +1,26 @@
+{
+  "name": "yt-manager",
+  "version": "1.0.0",
+  "description": "YT Manager desktop app",
+  "author": "College Project",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.college.ytmanager",
+    "productName": "YT Manager",
+    "files": ["main.js", "preload.js"],
+    "extraResources": [
+      { "from": "../backend/dist/ytm-backend.exe", "to": "backend/ytm-backend.exe" },
+      { "from": "../frontend/dist", "to": "frontend" }
+    ],
+    "win": { "target": "nsis" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
