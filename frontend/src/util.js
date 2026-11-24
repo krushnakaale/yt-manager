@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function fmtBytes(n) {
   if (n == null) return "unknown";
@@ -16,15 +16,28 @@ export const pct = (t) => (t.total_bytes ? Math.min(100, Math.round((t.bytes_rec
 export function useLoad(fn, deps = [], pollMs = 0) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const requestId = useRef(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const run = useCallback(async () => {
-    try { setData(await fn()); setError(""); } catch (e) { setError(e.message); }
+    const id = ++requestId.current;
+    try {
+      const result = await fn();
+      if (id !== requestId.current) return;
+      setData(result);
+      setError("");
+    } catch (e) {
+      if (id !== requestId.current) return;
+      setError(e.message);
+    }
   }, deps);
   useEffect(() => {
     run();
-    if (!pollMs) return;
+    if (!pollMs) return () => { requestId.current++; };
     const id = setInterval(run, pollMs);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      requestId.current++;
+    };
   }, [run, pollMs]);
   return { data, error, reload: run };
 }

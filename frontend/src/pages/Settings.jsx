@@ -94,14 +94,31 @@ function Downloads() {
 }
 
 function YouTubeApi() {
-  const { toast } = useUI();
+  const { toast, openExternal } = useUI();
   const s = useLoad(() => api.get("/api/settings"), []);
   const [key, setKey] = useState("");
+  const [checking, setChecking] = useState(false);
   const save = async (v) => { try { await api.put("/api/settings", { yt_api_key: v }); setKey(""); s.reload(); toast(v ? "API key saved on the backend" : "API key removed", "ok"); } catch (e) { toast(e.message, "danger"); } };
+  const test = async () => {
+    setChecking(true);
+    try {
+      const feed = await api.get("/api/feed/youtube?mode=popular&region=IN");
+      toast(`YouTube API works — loaded ${feed.videos.length} videos`, "ok");
+    } catch (e) {
+      toast(e.message, "danger");
+    } finally {
+      setChecking(false);
+    }
+  };
   return (
     <div className="card">
       <h2>YouTube Data API</h2>
-      <p className="muted">Optional. Without a key the app uses YouTube's oEmbed endpoint for titles and channels. The key is stored by the backend only and is never sent back to this screen. Search costs API quota.</p>
+      <p className="muted">A key enables the Home feed of popular videos across YouTube and YouTube search. It is stored by the backend only and is never returned to this screen.</p>
+      <ol className="api-setup-steps">
+        <li><button className="text-link" onClick={() => openExternal("https://console.cloud.google.com/apis/library/youtube.googleapis.com")}>Enable YouTube Data API v3 in Google Cloud</button> for a project.</li>
+        <li><button className="text-link" onClick={() => openExternal("https://console.cloud.google.com/apis/credentials")}>Open Credentials</button> and create an API key.</li>
+        <li>Restrict the key to <strong>YouTube Data API v3</strong>, then paste it below and save.</li>
+      </ol>
       <div className="row">
         <label className="grow">API key {s.data?.yt_api_key_set && <span className="ok">(a key is configured)</span>}
           <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste a new key" />
@@ -109,6 +126,7 @@ function YouTubeApi() {
         <button className="btn primary self-end" disabled={!key} onClick={() => save(key)}>Save key</button>
         {s.data?.yt_api_key_set && <button className="btn danger self-end" onClick={() => save("")}>Remove</button>}
       </div>
+      {s.data?.yt_api_key_set && <div className="row end"><button className="btn" disabled={checking} onClick={test}>{checking ? "Testing…" : "Test Home feed"}</button></div>}
     </div>
   );
 }

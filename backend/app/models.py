@@ -90,3 +90,19 @@ class AppSetting(Base):
     key = Column(String(60), primary_key=True)
     value = Column(Text, default="")
     updated_at = Column(DateTime, default=utcnow)
+
+
+class WatchHistory(Base):
+    __tablename__ = "watch_history"
+    id = Column(Integer, primary_key=True)
+    video_id = Column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    watched_at = Column(DateTime, default=utcnow)
+    video = relationship("Video")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = Column(Integer, primary_key=True)
+    channel_name = Column(String(200), nullable=False, unique=True, index=True)
+    channel_id = Column(String(60), nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, default=utcnow)

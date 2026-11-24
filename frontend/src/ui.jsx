@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { api } from "./api.js";
 
 const Ctx = createContext(null);
 export const useUI = () => useContext(Ctx);
@@ -8,7 +9,9 @@ export function Modal({ title, onClose, children, wide }) {
   useEffect(() => {
     const prev = document.activeElement;
     ref.current?.focus();
-    const onKey = (e) => e.key === "Escape" && onClose();
+    const onKey = (e) => {
+      if (e.key === "Escape" && !document.fullscreenElement) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); prev?.focus?.(); };
   }, [onClose]);
@@ -67,20 +70,49 @@ export function UIProvider({ children }) {
 }
 
 export function PreviewModal({ video, onClose }) {
-  const { openExternal } = useUI();
+  const { toast } = useUI();
+  const playerRef = useRef(null);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (Number.isInteger(video?.id)) api.post("/api/history/watch", { video_id: video.id }).catch(() => {});
+  }, [video?.id]);
+
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === playerRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const player = playerRef.current;
+    if (document.fullscreenElement !== player && !player?.requestFullscreen) {
+      toast("Full-screen mode is not supported on this device.", "danger");
+      return;
+    }
+    try {
+      if (document.fullscreenElement === player) await document.exitFullscreen();
+      else await player.requestFullscreen();
+    } catch (error) {
+      toast(`Could not change full screen: ${error.message}`, "danger");
+    }
+  };
+
   return (
     <Modal title={video.title} onClose={onClose} wide>
-      <div className="player">
+      <div className="player" ref={playerRef}>
         <iframe
           title={video.title}
-          src={`https://www.youtube-nocookie.com/embed/${video.video_id}?rel=0`}
-          allow="encrypted-media; picture-in-picture; fullscreen"
+          src={`https://www.youtube-nocookie.com/embed/${video.video_id}?rel=0&playsinline=1`}
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
           referrerPolicy="strict-origin-when-cross-origin"
           allowFullScreen
         />
+        <button className="btn player-fullscreen" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>
+          {fullscreen ? "Exit full screen" : "Full screen"}
+        </button>
       </div>
-      <p className="muted">{video.channel_name}. Playback uses YouTube's official embedded player; if the owner blocks embedding, use “Open on YouTube”.</p>
-      <div className="row end"><button className="btn" onClick={() => openExternal(video.source_url)}>Open on YouTube</button></div>
+      <p className="muted">{video.channel_name}. Playback stays in this app using YouTube's official player. Use its Picture-in-Picture control when available; YouTube background playback depends on YouTube and device support.</p>
     </Modal>
   );
 }

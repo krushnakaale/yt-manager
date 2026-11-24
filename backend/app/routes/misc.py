@@ -1,5 +1,7 @@
 import shutil
+import re
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -8,12 +10,85 @@ from sqlalchemy.orm import Session
 from .. import downloader, youtube
 from ..config import DEFAULT_DOWNLOAD_DIR, DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_DOWNLOAD_MB, YT_API_KEY
 from ..database import get_db, get_setting, set_setting
-from ..models import DownloadTask, Playlist, PlaylistItem, Video
-from ..schemas import BackupIn, SettingsIn
+from ..models import DownloadTask, Playlist, PlaylistItem, Subscription, Video, WatchHistory
+from ..schemas import BackupIn, SettingsIn, SubscriptionIn, WatchIn
 from ..security import parse_youtube_url, require_token, validate_download_folder
 from .videos import _api_key
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)], tags=["misc"])
+
+
+# ------------------------------------------------------------------ watch history
+@router.post("/history/watch", status_code=201)
+def record_watch(body: WatchIn, db: Session = Depends(get_db)):
+    video = db.get(Video, body.video_id)
+    if not video:
+        raise HTTPException(404, "Video not found")
+    item = db.query(WatchHistory).filter(WatchHistory.video_id == body.video_id).first()
+    if item:
+        item.watched_at = datetime.utcnow()
+    else:
+        item = WatchHistory(video_id=body.video_id)
+        db.add(item)
+    db.commit()
+    return video.to_dict()
+
+
+@router.get("/history/watch")
+def get_watch_history(db: Session = Depends(get_db)):
+    rows = db.query(WatchHistory).order_by(WatchHistory.watched_at.desc()).limit(200).all()
+    return [{"watched_at": r.watched_at.isoformat() + "Z", "video": r.video.to_dict()} for r in rows]
+
+
+@router.delete("/history/watch", status_code=204)
+def clear_watch_history(db: Session = Depends(get_db)):
+    db.query(WatchHistory).delete()
+    db.commit()
+
+
+# ------------------------------------------------------------------ subscriptions
+@router.get("/subscriptions")
+def list_subscriptions(db: Session = Depends(get_db)):
+    return [{"id": s.id, "channel_name": s.channel_name, "channel_id": s.channel_id}
+            for s in db.query(Subscription).order_by(Subscription.channel_name).all()]
+
+
+@router.post("/subscriptions", status_code=201)
+def add_subscription(body: SubscriptionIn, db: Session = Depends(get_db)):
+    channel_id = None
+    if body.channel_id:
+        match = re.search(
+            r"(?:youtube\.com/channel/)?(UC[A-Za-z0-9_-]{22})(?:/[^?#]*)?(?:\?[^#]*)?$",
+            body.channel_id.strip())
+        if not match:
+            raise HTTPException(400, "Enter a YouTube channel ID (UC… with 24 characters) or /channel/ URL")
+        channel_id = match.group(1)
+
+    name = (body.channel_name or channel_id or "").strip()
+    if not name:
+        raise HTTPException(400, "Enter a channel name or channel ID")
+    existing = db.query(Subscription).filter(Subscription.channel_name == name).first()
+    if existing:
+        if channel_id and not existing.channel_id:
+            existing.channel_id = channel_id
+            db.commit()
+            return {"id": existing.id, "channel_name": existing.channel_name, "channel_id": existing.channel_id}
+        raise HTTPException(409, "Already subscribed")
+    if channel_id and db.query(Subscription).filter(Subscription.channel_id == channel_id).first():
+        raise HTTPException(409, "Already following this channel")
+    sub = Subscription(channel_name=name[:200], channel_id=channel_id)
+    db.add(sub)
+    db.commit()
+    return {"id": sub.id, "channel_name": sub.channel_name, "channel_id": sub.channel_id}
+
+
+@router.delete("/subscriptions/{subscription_id}", status_code=204)
+def remove_subscription(subscription_id: int, db: Session = Depends(get_db)):
+    sub = db.get(Subscription, subscription_id)
+    if not sub:
+        raise HTTPException(404, "Subscription not found")
+    db.delete(sub)
+    db.commit()
 
 
 # ------------------------------------------------------------------ settings
@@ -100,6 +175,53 @@ async def search_youtube(q: str, db: Session = Depends(get_db)):
         return await youtube.search(q.strip()[:100], key)
     except RuntimeError as e:
         raise HTTPException(502, str(e))
+
+
+@router.get("/feed/youtube")
+async def youtube_feed(mode: str = "popular", region: str = "IN", category: str = "",
+                       page_token: str = "", q: str = "", db: Session = Depends(get_db)):
+    if mode not in {"popular", "rss", "search"}:
+        raise HTTPException(400, "Feed mode must be popular, search, or rss")
+    if len(page_token) > 1024:
+        raise HTTPException(400, "Invalid page token")
+    if len(q) > 100:
+        raise HTTPException(400, "Search term is too long")
+
+    key = _api_key(db)
+    if mode == "rss":
+        channels = [{"channel_id": sub.channel_id, "channel_name": sub.channel_name}
+                    for sub in db.query(Subscription).filter(Subscription.channel_id.isnot(None))
+                    .order_by(Subscription.channel_name).limit(20).all()]
+        if not channels:
+            return {"source": "rss", "videos": [], "channels": [],
+                    "next_page_token": "", "category": category, "query": ""}
+        try:
+            videos = await youtube.subscribed_videos(channels)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e))
+        return {"source": "rss", "videos": videos, "channels": channels,
+                "next_page_token": "", "category": category, "query": ""}
+
+    if not key:
+        raise HTTPException(400, "Add a YouTube Data API key in Settings for YouTube popular videos and search")
+    region = region.upper()
+    if len(region) != 2 or not (region.isascii() and region.isalpha()):
+        raise HTTPException(400, "Region must be a two-letter country code")
+    if category and category not in {"10", "17", "20", "22", "23", "24", "26", "27", "28"}:
+        raise HTTPException(400, "Unsupported YouTube category")
+    if mode == "search" and not q.strip():
+        raise HTTPException(400, "Enter a search term")
+    try:
+        if mode == "search":
+            result = await youtube.search_page(q.strip(), region, category, key, page_token)
+        else:
+            result = await youtube.popular(region, category, key, page_token)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return {"source": "youtube_search" if mode == "search" else "youtube_api",
+            "videos": result["videos"], "channels": [],
+            "next_page_token": result["next_page_token"], "category": category,
+            "query": q.strip() if mode == "search" else ""}
 
 
 # ------------------------------------------------------------------ backup / restore

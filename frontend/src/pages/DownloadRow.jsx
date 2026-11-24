@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { fmtBytes, fmtDate, fmtSpeed, isAndroid, pct } from "../util.js";
-import { saveToDevice } from "../native.js";
+import { playOwnedAudioInBackground, saveToDevice } from "../native.js";
 import { useUI } from "../ui.jsx";
 
 const LABEL = { queued: "Queued", downloading: "Downloading", paused: "Paused", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
@@ -10,6 +10,7 @@ export default function DownloadRow({ t, reload }) {
   const act = (fn) => async () => { try { await fn(); } catch (e) { toast(e.message, "danger"); } reload(); };
   const live = ["queued", "downloading"].includes(t.status);
   const missing = t.status === "completed" && t.file_exists === false;
+  const localAudio = t.source_url === "local-file" && /\.(mp3|m4a|aac|wav|ogg|opus|flac)$/i.test(t.filename);
 
   const removeFile = async () => {
     if (!(await confirm(`Delete “${t.filename}” from your device? This cannot be undone.`, "Delete file", true))) return;
@@ -47,6 +48,10 @@ export default function DownloadRow({ t, reload }) {
           <button className="btn" onClick={() => window.ytm.showItem(t.destination)}>Show in folder</button>
         </>}
         {t.status === "completed" && !missing && isAndroid() && <button className="btn" onClick={save}>Save to device</button>}
+        {t.status === "completed" && !missing && isAndroid() && localAudio && <button className="btn" onClick={async () => {
+          try { await playOwnedAudioInBackground(t); toast("Playing your local audio in the background", "ok"); }
+          catch (e) { toast(e.message, "danger"); }
+        }}>Play in background</button>}
         {t.status === "completed" && !missing && <button className="btn danger" onClick={removeFile}>Delete file</button>}
         {!live && <button className="btn" onClick={act(() => api.del(`/api/downloads/${t.id}`))}>Remove from list</button>}
       </div>

@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect
 
 from .config import CORS_ORIGINS, MAX_JSON_BODY, MAX_UPLOAD_MB, RATE_LIMIT_PER_MIN, STATIC_DIR
 from .database import Base, SessionLocal, engine
@@ -19,6 +20,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 Base.metadata.create_all(engine)
+if "channel_id" not in {column["name"] for column in inspect(engine).get_columns("subscriptions")}:
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE subscriptions ADD COLUMN channel_id VARCHAR(60)")
+with engine.begin() as connection:
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_channel_id ON subscriptions (channel_id)")
 with SessionLocal() as _db:       # downloads that were running when the app closed become resumable
     _db.query(DownloadTask).filter(DownloadTask.status.in_(("queued", "downloading"))).update(
         {"status": "paused"}, synchronize_session=False)

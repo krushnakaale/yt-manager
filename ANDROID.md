@@ -20,10 +20,12 @@ real deployment) and the Android app is the shared React UI wrapped by Capacitor
    cd frontend
    npm install
    npm run build
-   npx cap add android
+   npm run android:add
    npm run android:sync
    npm run android:open        # opens Android Studio
    ```
+   `android:add` and `android:sync` configure the native media service and permissions required
+   for background playback.
 3. In Android Studio: *Build > Generate Signed Bundle / APK* to build and sign the `.apk`.
 4. Open the app, go to **Settings > Server connection**, enter `http://<PC-IP>:8000` and the token.
 
@@ -31,10 +33,22 @@ real deployment) and the Android app is the shared React UI wrapped by Capacitor
 Downloads are fetched by the backend. When one finishes, press **Save to device**: the app copies the file
 into `Documents/YTManager` using the Capacitor Filesystem plugin (Android scoped storage, so no broad
 storage permission is requested). Very large files are read into memory for this copy, so keep Android
-downloads modest or move to a streaming native plugin later.
+downloads modest.
+
+## Background playback
+The official YouTube embed remains in-app and allows Picture-in-Picture where the platform supports it.
+YouTube playback itself is subject to YouTube's player and device restrictions; this app does not extract
+YouTube audio or keep YouTube streams playing in the background. On Android, **Play in background** is
+available for supported audio files added through **Add my own file**. It uses the native media notification
+and continues when the app is minimized. Android permissions and service registration are applied by the
+`android:add` and `android:sync` scripts.
+
+For an iOS build, enable the **Audio, AirPlay, and Picture in Picture** background mode in Xcode
+(*Signing & Capabilities > Background Modes > Audio*). The Android background-audio setup script does not
+modify iOS project files.
 
 ## Production notes
 - `capacitor.config.json` uses `androidScheme: "http"` and `cleartext: true` so a LAN server works. For a real
   release, serve the backend over HTTPS, set `androidScheme` to `https` and `cleartext` to `false`.
-- Background downloads with notifications (the document's Phase 7) would need a native Android service
-  or WorkManager plugin. That part is **not implemented** here.
+- Background downloads with notifications (the document's Phase 7) would need a separate native Android
+  service or WorkManager plugin. That part is **not implemented** here.

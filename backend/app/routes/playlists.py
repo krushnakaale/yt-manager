@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..models import Playlist, PlaylistItem, Video
@@ -24,7 +24,13 @@ def _detail(p: Playlist) -> dict:
 
 @router.get("")
 def list_playlists(db: Session = Depends(get_db)):
-    return [p.to_dict() for p in db.query(Playlist).order_by(Playlist.name).all()]
+    playlists = (db.query(Playlist)
+                 .options(selectinload(Playlist.items).joinedload(PlaylistItem.video))
+                 .order_by(Playlist.name).all())
+    return [{**p.to_dict(), "cover_thumbnails": [
+        item.video.thumbnail_url for item in p.items
+        if item.video and item.video.thumbnail_url
+    ][:4]} for p in playlists]
 
 
 @router.post("", status_code=201)

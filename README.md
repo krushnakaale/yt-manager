@@ -1,118 +1,141 @@
 # YT Manager
 
-Video and playlist organizer with authorized local downloads.
-React (UI) + Electron (Windows) + Capacitor (Android) + Python FastAPI + SQLite.
+YT Manager is a local video library and playlist app built with React, FastAPI, and SQLite. It can discover public YouTube videos, organize saved links, play videos using YouTube's official embedded player, and manage files you are authorized to download.
 
-```
-yt-manager/
-├── backend/    FastAPI API, SQLite models, secure download manager
-├── frontend/   React UI (Vite), theme system, Capacitor config
-├── electron/   Windows shell: secure preload bridge, installer config
-├── build_windows.bat
-└── ANDROID.md  APK steps
-```
+> This is an independent project and is not affiliated with or endorsed by YouTube or Google.
 
-## Run in development (Windows / Linux / macOS)
+## Features
 
-Terminal 1: backend
+- **Home feed:** browse popular videos and search YouTube with the YouTube Data API v3. Follow channels to see their recent public uploads through RSS without an API key.
+- **Video library:** save YouTube links, search and sort your collection, mark favourites, add notes/tags, and organize videos by category.
+- **Playlists:** create and edit playlists, view thumbnail covers, and add, remove, play, or reorder saved videos.
+- **In-app playback:** YouTube links open in YouTube's official embedded player. Fullscreen and picture-in-picture availability depends on the player, platform, and device.
+- **Downloads and local files:** track downloads, pause/resume or retry supported tasks, and add files that you own to the library. Only download content you own or have permission to download, and follow the source platform's terms and applicable laws.
+- **History and backup:** review watch history and export or import library and playlist data as JSON.
+- **Appearance:** choose a theme, customize colours, and adjust motion settings.
+- **Windows desktop:** package the app in an Electron shell with a bundled local backend.
+- **Android:** use the Capacitor app with a separately running FastAPI backend. Supported audio files that you add yourself can continue playing in the background on Android. YouTube playback itself cannot be forced to continue in the background.
 
-```bash
+## Technology
+
+- Frontend: React 18, Vite, Capacitor 6
+- Backend: Python, FastAPI, SQLAlchemy, SQLite
+- Windows desktop wrapper: Electron
+- Android wrapper: Capacitor
+
+## Requirements
+
+- Python 3.11 or newer
+- Node.js 18 or newer and npm
+- Android Studio and an Android SDK only if building the Android app
+
+## Run locally
+
+Open two terminals in the `yt-manager` project directory.
+
+### 1. Start the backend
+
+```powershell
 cd backend
-python -m venv .venv && .venv\Scripts\activate      # Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-python run.py                                       # http://127.0.0.1:8000
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python run.py
 ```
 
-Terminal 2: UI
+The development backend listens on `http://127.0.0.1:8000`.
 
-```bash
+On Command Prompt, activate the environment with `.venv\Scripts\activate.bat`. On macOS or Linux, use `python3 -m venv .venv` and `source .venv/bin/activate`.
+
+### 2. Start the frontend
+
+In the second terminal:
+
+```powershell
 cd frontend
-npm install
-npm run dev                                         # http://localhost:5173
+npm ci
+npm run dev -- --strictPort
 ```
 
-Dev mode has no API token (set `YTM_TOKEN` yourself if you want to test it). Optional: `YTM_YT_API_KEY` env var.
+Open the Vite URL printed in the terminal (normally `http://localhost:5173`). You can also run `run_dev.bat` from the project directory after installing the backend and frontend dependencies; it starts both development servers.
 
-## Build the Windows installer
+The default development backend is intended for local use. It binds to loopback and does not require an API token unless `YTM_TOKEN` is configured. Do not expose it to an untrusted network without configuring access controls.
 
-Run `build_windows.bat` from the project root. It builds the React app, packs the backend into
-`ytm-backend.exe` with PyInstaller, and creates the installer in `electron/dist/` with electron-builder.
+## Configure YouTube Data API
 
-## Build the APK
+An API key is optional:
 
-See `ANDROID.md`.
+- Popular videos and YouTube search require a key.
+- Channel RSS feeds do not require a key, but you need to follow channels by their channel ID.
 
-## Feature map (from the requirements document)
+To create a key:
 
-| Module                                                                            | Where                                                                |
-| --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Dashboard (cards, storage, activity log)                                          | `frontend/src/pages/Dashboard.jsx`, `GET /api/stats`, `/api/storage` |
-| Video Library (validate, metadata, search, sort, categorize, edit, remove)        | `Library.jsx`, `routes/videos.py`                                    |
-| Playlists (create, rename, delete, add/remove, ordering)                          | `Playlists.jsx`, `routes/playlists.py`                               |
-| Search (local + optional YouTube Data API)                                        | `Library.jsx`, `routes/misc.py`                                      |
-| Preview with the official embedded player                                         | `ui.jsx` (`youtube-nocookie.com/embed`)                              |
-| Download Manager (progress, speed, cancel, resume with Range)                     | `downloader.py`, `Downloads.jsx`                                     |
-| History, File Manager (reveal, delete with confirm, missing-file detection)       | `History.jsx`, `DownloadRow.jsx`                                     |
-| Settings, themes (5 presets, custom colours, live preview, reset, reduced motion) | `Settings.jsx`, `theme.js`                                           |
+1. Enable [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com) in a Google Cloud project.
+2. Create an API key in [Google Cloud Credentials](https://console.cloud.google.com/apis/credentials).
+3. Restrict the key to YouTube Data API v3.
+4. In YT Manager, open **Settings > YouTube Data API**, paste the key, and save it. Use **Test Home feed** to verify it.
 
-## Extra features added
+The key is saved by the backend and is not returned to the frontend. Alternatively, set `YTM_YT_API_KEY` in the backend process environment. Never commit API keys or tokens to source control.
 
-- Favourites, tags and notes on videos; batch add (paste many links at once); duplicate detection
-- Pause and resume downloads (HTTP Range) and retry for failed ones
-- SHA-256 checksum for every finished download; warning label for executable or script file types
-- "Add my own file" to bring a file you already own into the managed folder
-- Backup export / import (JSON) for library and playlists
-- Theme contrast checker (WCAG ratio) and neon accent shortcuts
-- `/` keyboard shortcut for search, skip link, keyboard-friendly playlist reordering
-- Backend offline banner; Android "Save to device" button
+## Build
 
-## Security measures implemented
+### Windows installer
 
-- Electron: `contextIsolation`, no Node in renderer, `sandbox`, narrow preload bridge, IPC accepted only from the app's own origin, popups and foreign navigation blocked, permission requests denied
-- Backend bound to `127.0.0.1` on a random port with a per-launch token (`X-YTM-Token`, constant-time compare)
-- SSRF guard (`security.py`): http/https only, no credentials in URL, port allowlist, every resolved address must be public (blocks localhost, private, link-local, CGNAT, reserved, IPv4-mapped IPv6); checked again on each of up to 5 redirects
-- Server-side validation of YouTube URLs, filenames (path traversal, Windows reserved names) and the download folder (system folders refused, must be writable)
-- Downloads only go to the one configured folder; deleting a file needs `confirm=true` and the file must be inside that folder
-- Size limit, 3 hour time limit, HTML pages rejected, request body limit, rate limit, safe error messages
-- API key kept in env var or backend database only; never returned to the UI; sent in a header so it never appears in URLs or logs
-- No ads/trackers; external links always ask first (UI dialog, then a native dialog in Electron)
+From the project directory, run:
 
-## Honest notes and limits
+```powershell
+.\build_windows.bat
+```
 
-- **Not run end to end yet.** The environment this was written in had no internet, so I could not install
-  FastAPI/npm packages, start the servers or build the EXE/APK. What _was_ checked: all Python files compile,
-  the security helpers were tested (URL parsing, SSRF blocking, filename sanitising), and all JSX/JS files
-  parse without syntax errors. Expect to fix a few small things on your first real run.
-- DNS rebinding: the host is validated before each request, but the HTTP client resolves it again when
-  connecting. For a college project this is acceptable; a hardened version would pin the validated IP.
-- Android background downloads/notifications (Phase 7) are not implemented; see `ANDROID.md`.
-- PostgreSQL, accounts and sync are intentionally left out (the document says to add them only after the local version is stable).
-- Phase 8 items (user guide, screenshots, test report) are for you to produce once it runs.
+The script builds the frontend, packages the FastAPI backend with PyInstaller, and creates a Windows installer with Electron Builder. The installer is written to `electron\dist\`.
 
-## About the Developer
+### Android app
 
-### Krushna Kale
+The Android client requires a FastAPI backend that the phone can reach. Follow [ANDROID.md](ANDROID.md) for backend networking, token configuration, Android project generation, and signing instructions. The basic frontend commands are:
 
-**Python Developer | Software Development Enthusiast | Tech Explorer**
+```powershell
+cd frontend
+npm ci
+npm run android:add
+npm run android:sync
+npm run android:open
+```
 
-I'm **Krushna Kale**, an aspiring software developer passionate about building practical, reliable, and user-focused applications.
+`android:add` is for the initial native project setup. `android:sync` builds the web app, syncs Capacitor assets, and configures the Android audio service.
 
-My interests include **Python Development, Software Engineering, Automation, Artificial Intelligence, and Cybersecurity**. I focus on strengthening my technical expertise through hands-on projects, continuous learning, and real-world problem-solving.
+## Data and configuration
 
-My goal is to grow as a software developer while creating meaningful solutions and contributing to the developer community.
+In development, the SQLite database defaults to `~/.ytmanager/ytmanager.db` and downloads default to `~/YTManager/Downloads`. The download directory and other app settings can be changed in **Settings**.
 
-**My Approach:** _Learn continuously. Build purposefully. Improve consistently._
+| Environment variable | Purpose |
+| --- | --- |
+| `YTM_DATA_DIR` | Directory for the SQLite database and app data |
+| `YTM_DOWNLOAD_DIR` | Default directory for managed downloads |
+| `YTM_YT_API_KEY` | Optional YouTube Data API v3 key |
+| `YTM_TOKEN` | Optional backend API token; required when configuring a protected remote backend |
+| `YTM_PORT` | Backend port; defaults to `8000` |
+| `YTM_CORS` | Comma-separated allowed browser origins; see [ANDROID.md](ANDROID.md) for Android setup |
 
-### Connect With Me
+The Windows Electron app uses its application data directory for its database. Keep personal database files, API keys, and downloaded media out of Git.
 
-| Platform      | Profile                                                                   |
-| ------------- | ------------------------------------------------------------------------- |
-| **GitHub**    | [github.com/krushnakaale](https://github.com/krushnakaale)                |
-| **LinkedIn**  | [linkedin.com/in/krushnakaale](https://www.linkedin.com/in/krushnakaale/) |
-| **Instagram** | [instagram.com/krushna_kaale](https://www.instagram.com/krushnakaale/)    |
+## YouTube playback and downloads
 
----
+YouTube videos play through the official embedded player; YT Manager does not extract YouTube audio or bypass player restrictions. Fullscreen and picture-in-picture are subject to YouTube and device support. Background playback in this app is for supported local audio files that you add yourself, not YouTube streams.
 
-_Developed and maintained by **Krushna Kale**._
+Only download media that you own or are authorized to save. You are responsible for complying with the source service's terms and local laws.
 
-**© 2026 Krushna Kale. All rights reserved.**
+## Project layout
+
+```text
+yt-manager/
+|-- backend/       FastAPI API, SQLite models, and download manager
+|-- electron/      Windows desktop shell and installer configuration
+|-- frontend/      React UI, Vite configuration, and Capacitor app
+|-- ANDROID.md     Android networking, build, and background audio guide
+|-- build_windows.bat
+`-- run_dev.bat
+```
+
+## License
+
+This project is distributed under the [MIT License](LICENSE).

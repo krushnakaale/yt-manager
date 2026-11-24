@@ -56,3 +56,12 @@ class BackupIn(BaseModel):
     version: int = 1
     videos: list[dict] = Field(default_factory=list, max_length=5000)
     playlists: list[dict] = Field(default_factory=list, max_length=500)
+
+
+class WatchIn(BaseModel):
+    video_id: int
+
+
+class SubscriptionIn(BaseModel):
+    channel_name: str | None = Field(default=None, max_length=200)
+    channel_id: str | None = Field(default=None, max_length=500)

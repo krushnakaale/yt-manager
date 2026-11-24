@@ -26,20 +26,23 @@ function YouTubeSearch({ onAdded }) {
   const [q, setQ] = useState("");
   const [res, setRes] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [searched, setSearched] = useState(false);
   const go = async (e) => {
     e.preventDefault();
     if (!q.trim()) return;
     setBusy(true);
-    try { setRes(await api.get(`/api/search/youtube?q=${encodeURIComponent(q)}`)); } catch (er) { toast(er.message, "danger"); }
-    setBusy(false);
+    setSearched(true);
+    try { setRes(await api.get(`/api/search/youtube?q=${encodeURIComponent(q)}`)); }
+    catch (er) { setRes([]); toast(er.message, "danger"); }
+    finally { setBusy(false); }
   };
   const add = async (r) => {
     try { await api.post("/api/videos", { url: r.url }); toast("Saved to library", "ok"); onAdded(); } catch (er) { toast(er.message, "danger"); }
   };
   return (
-    <div className="card">
-      <form className="row" onSubmit={go}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search YouTube metadata (uses your API quota)" aria-label="Search YouTube" />
+    <div className="library-youtube-search">
+      <form className="row wrap" onSubmit={go}>
+        <input className="grow" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search titles, channels, or topics" aria-label="Search YouTube" />
         <button className="btn" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
       </form>
       <div className="list">
@@ -51,12 +54,13 @@ function YouTubeSearch({ onAdded }) {
           </div>
         ))}
       </div>
+      {searched && !busy && !res.length && <p className="muted">No YouTube results found. Try a different search.</p>}
     </div>
   );
 }
 
 export default function Library() {
-  const { toast, confirm, openExternal } = useUI();
+  const { toast, confirm } = useUI();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [favorite, setFavorite] = useState(false);
@@ -65,6 +69,7 @@ export default function Library() {
   const [cat, setCat] = useState("General");
   const [tags, setTags] = useState("");
   const [adding, setAdding] = useState(false);
+  const [showAddLinks, setShowAddLinks] = useState(false);
   const [showYT, setShowYT] = useState(false);
   const [preview, setPreview] = useState(null);
   const [edit, setEdit] = useState(null);
@@ -73,7 +78,23 @@ export default function Library() {
   const vids = useLoad(() => api.get(`/api/videos?${params}`), [q, category, favorite, sort]);
   const cats = useLoad(() => api.get("/api/categories"), []);
   const pls = useLoad(() => api.get("/api/playlists"), []);
-  const reloadAll = () => { vids.reload(); cats.reload(); };
+  const subscriptions = useLoad(() => api.get("/api/subscriptions"), []);
+  const stats = useLoad(() => api.get("/api/stats"), []);
+  const reloadAll = () => { vids.reload(); cats.reload(); stats.reload(); };
+  const toggleSubscription = async (channelName) => {
+    if (!channelName) return;
+    const sub = subscriptions.data?.find((s) => s.channel_name === channelName);
+    try {
+      if (sub) {
+        await api.del(`/api/subscriptions/${sub.id}`);
+        toast("Unsubscribed", "ok");
+      } else {
+        await api.post("/api/subscriptions", { channel_name: channelName });
+        toast("Subscribed", "ok");
+      }
+      subscriptions.reload();
+    } catch (e) { toast(e.message, "danger"); }
+  };
 
   const add = async (e) => {
     e.preventDefault();
@@ -94,9 +115,13 @@ export default function Library() {
 
   const remove = async (v) => {
     if (!(await confirm(`Remove “${v.title}” from your library? It will also leave any playlists.`, "Remove", true))) return;
-    await api.del(`/api/videos/${v.id}`); toast("Removed"); reloadAll();
+    try { await api.del(`/api/videos/${v.id}`); toast("Removed from library", "ok"); reloadAll(); }
+    catch (e) { toast(e.message, "danger"); }
   };
-  const toggleFav = async (v) => { await api.patch(`/api/videos/${v.id}`, { favorite: !v.favorite }); vids.reload(); };
+  const toggleFav = async (v) => {
+    try { await api.patch(`/api/videos/${v.id}`, { favorite: !v.favorite }); vids.reload(); stats.reload(); }
+    catch (e) { toast(e.message, "danger"); }
+  };
   const addToPlaylist = async (v, pid) => {
     if (!pid) return;
     try { await api.post(`/api/playlists/${pid}/items`, { video_id: v.id }); toast("Added to playlist", "ok"); pls.reload(); }
@@ -117,60 +142,107 @@ export default function Library() {
   };
 
   return (
-    <section>
-      <h1>Video library</h1>
-      <form className="card" onSubmit={add}>
-        <label>Add YouTube links (one per line, or several at once)
-          <textarea rows={2} value={links} onChange={(e) => setLinks(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" />
+    <section className="library-page">
+      <header className="page-heading">
+        <div>
+          <h1>Your library</h1>
+          <p className="muted">Saved videos, favourites and playlists in one place.</p>
+        </div>
+        <div className="row wrap">
+          <button className={"btn" + (showYT ? " on" : "")} aria-pressed={showYT} onClick={() => setShowYT(!showYT)}>
+            {showYT ? "Close YouTube search" : "Find videos"}
+          </button>
+          <button className="btn primary" onClick={() => setShowAddLinks(!showAddLinks)}>
+            {showAddLinks ? "Close" : "Add videos"}
+          </button>
+        </div>
+      </header>
+
+      <div className="library-summary">
+        <div className="library-stat"><span>Saved videos</span><strong>{stats.data?.videos ?? vids.data?.length ?? "—"}</strong></div>
+        <div className="library-stat"><span>Favourites</span><strong>{stats.data?.favorites ?? "—"}</strong></div>
+        <div className="library-stat"><span>Playlists</span><strong>{pls.data?.length ?? "—"}</strong></div>
+      </div>
+
+      {showYT && <div className="card library-panel">
+        <div className="section-heading"><div><h2>Find videos on YouTube</h2><p className="muted">Search and save videos to your library.</p></div>
+          <button className="btn ghost" onClick={() => setShowYT(false)} aria-label="Close YouTube search">✕</button>
+        </div>
+        <YouTubeSearch onAdded={reloadAll} />
+      </div>}
+      {showAddLinks && <form className="card library-panel" onSubmit={add}>
+        <div className="section-heading"><div><h2>Add YouTube links</h2><p className="muted">Paste one or more links to keep them in your library.</p></div></div>
+        <label>Video links
+          <textarea rows={3} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={"https://www.youtube.com/watch?v=…\nhttps://youtu.be/…"} />
         </label>
-        <div className="row">
+        <div className="row wrap">
           <label className="grow">Category<input value={cat} onChange={(e) => setCat(e.target.value)} list="cats" maxLength={60} /></label>
           <label className="grow">Tags<input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="lecture, python" /></label>
-          <button className="btn primary self-end" disabled={adding}>{adding ? "Saving…" : "Save links"}</button>
+          <button className="btn primary self-end" disabled={adding}>{adding ? "Saving…" : "Save to library"}</button>
         </div>
         <datalist id="cats">{cats.data?.map((c) => <option key={c} value={c} />)}</datalist>
-      </form>
+      </form>}
 
-      <div className="row wrap toolbar">
-        <input id="lib-search" className="grow" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, channel, tags, notes" aria-label="Search library" />
+      <div className="library-controls">
+        <input id="lib-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your saved videos" aria-label="Search library" />
         <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
           <option value="">All categories</option>{cats.data?.map((c) => <option key={c}>{c}</option>)}
         </select>
         <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
-          <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+          <option value="newest">Recently added</option><option value="oldest">Oldest added</option>
           <option value="title">Title A–Z</option><option value="channel">Channel A–Z</option>
         </select>
-        <button className={"btn" + (favorite ? " on" : "")} aria-pressed={favorite} onClick={() => setFavorite(!favorite)}>★ Favourites</button>
-        <button className={"btn" + (showYT ? " on" : "")} aria-pressed={showYT} onClick={() => setShowYT(!showYT)}>Search YouTube</button>
+        <button className={"btn" + (favorite ? " on" : "")} aria-pressed={favorite} onClick={() => setFavorite(!favorite)}>
+          {favorite ? "★ Favourites" : "☆ Favourites"}
+        </button>
       </div>
-      {showYT && <YouTubeSearch onAdded={reloadAll} />}
       <ErrorNote error={vids.error} onRetry={vids.reload} />
+      <div className="library-results">
+        <strong>{vids.data ? `${vids.data.length} ${vids.data.length === 1 ? "video" : "videos"}` : "Loading library…"}</strong>
+        {category && <span className="chip">{category}</span>}
+        {favorite && <span className="chip alt">Favourites</span>}
+      </div>
 
       {vids.data && !vids.data.length && (
         <Empty title={q || category || favorite ? "No videos match these filters" : "Your library is empty"}
-               hint={q || category || favorite ? "Clear a filter to see more." : "Paste a YouTube link above to save your first video."} />
+               hint={q || category || favorite ? "Clear a filter to see more." : "Add a video link or find a video on YouTube to get started."}>
+          {!q && !category && !favorite && <div className="row wrap"><button className="btn primary" onClick={() => setShowAddLinks(true)}>Add videos</button><button className="btn" onClick={() => setShowYT(true)}>Find videos</button></div>}
+        </Empty>
       )}
-      <div className="grid">
+      <div className="library-grid">
         {vids.data?.map((v) => (
-          <article className="vcard" key={v.id}>
-            <button className="thumb" onClick={() => setPreview(v)} aria-label={`Preview ${v.title}`}>
+          <article className="library-card" key={v.id}>
+            <button className="library-thumb" onClick={() => setPreview(v)} aria-label={`Play ${v.title}`}>
               <img src={v.thumbnail_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+              <span className="library-play-overlay">▶ Play</span>
+              {v.favorite && <span className="library-favourite-badge">★ Favourite</span>}
             </button>
-            <div className="vbody">
-              <h3 title={v.title}>{v.title}</h3>
-              <div className="muted">{v.channel_name}</div>
-              <div className="chips"><span className="chip">{v.category}</span>{v.tags.map((t) => <span className="chip alt" key={t}>#{t}</span>)}</div>
+            <div className="library-card-body">
+              <div className="library-card-heading">
+                <div className="channel-avatar">{(v.channel_name || "Y").slice(0, 1).toUpperCase()}</div>
+                <div className="grow">
+                  <h3 title={v.title}>{v.title}</h3>
+                  <span className="muted">{v.channel_name || "Unknown channel"}</span>
+                  <span className="muted library-date">{v.created_at ? `Added ${new Date(v.created_at).toLocaleDateString()}` : ""}</span>
+                </div>
+                <button className="btn ghost library-favourite" onClick={() => toggleFav(v)} aria-pressed={v.favorite} aria-label={v.favorite ? "Remove from favourites" : "Add to favourites"}>
+                  {v.favorite ? "★" : "☆"}
+                </button>
+              </div>
+              <div className="chips"><span className="chip">{v.category || "General"}</span>{v.tags.map((t) => <span className="chip alt" key={t}>#{t}</span>)}</div>
               {v.notes && <p className="muted clamp">{v.notes}</p>}
-              <div className="row wrap actions">
-                <button className="btn" onClick={() => toggleFav(v)} aria-pressed={v.favorite} aria-label="Toggle favourite">{v.favorite ? "★" : "☆"}</button>
-                <button className="btn" onClick={() => setPreview(v)}>Preview</button>
+              {v.channel_name && <button className={"btn library-subscribe" + (subscriptions.data?.some((s) => s.channel_name === v.channel_name) ? " on" : "")}
+                onClick={() => toggleSubscription(v.channel_name)}>
+                {subscriptions.data?.some((s) => s.channel_name === v.channel_name) ? "Subscribed" : "Subscribe to channel"}
+              </button>}
+              <div className="row wrap library-card-actions">
+                <button className="btn primary" onClick={() => setPreview(v)}>Play</button>
                 <button className="btn" onClick={() => downloadVideo(v, "video")}>🎬 Video</button>
                 <button className="btn" onClick={() => downloadVideo(v, "audio")}>🎵 MP3</button>
-                <button className="btn" onClick={() => setEdit(v)}>Edit</button>
-                <button className="btn" onClick={() => openExternal(v.source_url)}>YouTube</button>
+                <button className="btn" onClick={() => setEdit(v)}>Edit details</button>
                 <button className="btn danger" onClick={() => remove(v)}>Remove</button>
               </div>
-              <select aria-label={`Add ${v.title} to playlist`} value="" onChange={(e) => addToPlaylist(v, e.target.value)}>
+              <select className="library-add-playlist" aria-label={`Add ${v.title} to playlist`} value="" onChange={(e) => addToPlaylist(v, e.target.value)}>
                 <option value="">Add to playlist…</option>{pls.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
