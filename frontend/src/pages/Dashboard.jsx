@@ -17,19 +17,29 @@ export default function Dashboard({ query = "" }) {
   const { toast } = useUI();
   const [category, setCategory] = useState("");
   const [sourceMode, setSourceMode] = useState("popular");
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const searchTerm = query.trim();
   const effectiveMode = searchTerm ? "search" : sourceMode;
   const feed = useLoad(() => {
-    const params = new URLSearchParams({ mode: effectiveMode, region: "IN", category });
+    const params = new URLSearchParams({
+      mode: effectiveMode,
+      region: "IN",
+      category,
+      refresh: refreshNonce ? "true" : "false",
+    });
     if (searchTerm) params.set("q", searchTerm);
     return api.get(`/api/feed/youtube?${params}`);
-  }, [effectiveMode, category, searchTerm]);
+  }, [effectiveMode, category, searchTerm, refreshNonce]);
   const subscriptions = useLoad(() => api.get("/api/subscriptions"), []);
+  const favoriteVideos = useLoad(() => api.get("/api/videos?favorite=true"), []);
   const [channelId, setChannelId] = useState("");
   const [preview, setPreview] = useState(null);
+  const [previewQueue, setPreviewQueue] = useState([]);
+  const [favoriteOverrides, setFavoriteOverrides] = useState({});
   const [moreVideos, setMoreVideos] = useState([]);
   const [nextPageToken, setNextPageToken] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const continueWatching = useLoad(() => api.get("/api/history/watch"), []);
   const sentinel = useRef(null);
   const feedKey = useRef(`${effectiveMode}:${category}:${searchTerm}`);
   const expectedSource = effectiveMode === "search" ? "youtube_search"
@@ -40,6 +50,16 @@ export default function Dashboard({ query = "" }) {
   const isRssFeed = effectiveMode === "rss";
   const isSearchFeed = effectiveMode === "search";
   const displayedVideos = [...videos, ...moreVideos];
+  const continueQueue = (continueWatching.data || [])
+    .filter((row) => row.progress_seconds > 5 && !row.completed)
+    .map((row) => ({ ...row.video, progress_seconds: row.progress_seconds }));
+  const openPreview = (video, queue) => {
+    setPreview(video);
+    setPreviewQueue(queue);
+  };
+  const isFeedFavorite = (videoId) => Object.prototype.hasOwnProperty.call(favoriteOverrides, videoId)
+    ? favoriteOverrides[videoId]
+    : (favoriteVideos.data || []).some((saved) => saved.video_id === videoId);
 
   useEffect(() => {
     feedKey.current = `${effectiveMode}:${category}:${searchTerm}`;
@@ -58,6 +78,19 @@ export default function Dashboard({ query = "" }) {
       await api.post("/api/videos", { url: v.url });
       toast("Saved to your library", "ok");
     } catch (e) { toast(e.message.includes("already") ? "Already in your library" : e.message, e.message.includes("already") ? "info" : "danger"); }
+  };
+  const toggleFeedFavorite = async (v) => {
+    const isFavorite = isFeedFavorite(v.video_id);
+    const next = !isFavorite;
+    setFavoriteOverrides((current) => ({ ...current, [v.video_id]: next }));
+    try {
+      await api.put(`/api/videos/youtube/${encodeURIComponent(v.video_id)}/favorite`, { favorite: next });
+      favoriteVideos.reload();
+      toast(next ? "Added to favourites" : "Removed from favourites", "ok");
+    } catch (e) {
+      setFavoriteOverrides((current) => ({ ...current, [v.video_id]: isFavorite }));
+      toast(e.message, "danger");
+    }
   };
   const addChannel = async (e) => {
     e.preventDefault();
@@ -114,6 +147,38 @@ export default function Dashboard({ query = "" }) {
       {effectiveMode !== "rss" && <div className="feed-chips" aria-label="YouTube video categories">
         {FEED_CATEGORIES.map((item) => <button key={item.id} className={"feed-chip" + (category === item.id ? " active" : "")} onClick={() => setCategory(item.id)}>{item.label}</button>)}
       </div>}
+      {!searchTerm && continueWatching.data?.some((row) => row.progress_seconds > 5 && !row.completed) && (
+        <section className="continue-section" aria-labelledby="continue-watching-heading">
+          <h2 id="continue-watching-heading">Continue watching</h2>
+          <div className="continue-grid">
+            {continueWatching.data
+              .filter((row) => row.progress_seconds > 5 && !row.completed)
+              .slice(0, 6)
+              .map((row) => {
+                const percent = row.duration_seconds
+                  ? Math.min(100, Math.max(0, row.progress_seconds / row.duration_seconds * 100))
+                  : 0;
+                return (
+                  <button className="continue-card" key={row.video.id}
+                    onClick={() => openPreview(
+                      { ...row.video, progress_seconds: row.progress_seconds },
+                      continueQueue,
+                    )}>
+                    <span className="continue-thumb">
+                      <img src={row.video.thumbnail_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                      <span className="continue-play">▶</span>
+                    </span>
+                    <span className="continue-copy">
+                      <strong>{row.video.title}</strong>
+                      <small className="muted">{row.video.channel_name || "Unknown channel"}</small>
+                    </span>
+                    <span className="progress-track"><i style={{ width: `${percent}%` }} /></span>
+                  </button>
+                );
+              })}
+          </div>
+        </section>
+      )}
       <div className="home-heading">
         <div>
           <h1>{isSearchFeed ? `Search results for “${searchTerm}”`
@@ -124,7 +189,9 @@ export default function Dashboard({ query = "" }) {
         </div>
         <div className="row">
           {isSearchFeed && <button className="btn" onClick={() => { location.hash = "#/dashboard"; }}>Clear search</button>}
-          <button className="btn" onClick={feed.reload} disabled={!feed.data}>Refresh</button>
+          <button className="btn" onClick={() => setRefreshNonce((value) => value + 1)}>
+            <span aria-hidden="true">↻</span> Refresh
+          </button>
         </div>
       </div>
       <ErrorNote error={feed.error} onRetry={feed.reload} />
@@ -157,7 +224,7 @@ export default function Dashboard({ query = "" }) {
         <div className="youtube-grid">
           {displayedVideos.map((v) => (
             <article className="youtube-card" key={v.video_id}>
-              <button className="youtube-thumb" onClick={() => setPreview({ ...v, source_url: v.url })} aria-label={`Play ${v.title}`}>
+              <button className="youtube-thumb" onClick={() => openPreview({ ...v, source_url: v.url }, displayedVideos)} aria-label={`Play ${v.title}`}>
                 <img src={v.thumbnail_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
                 <span className="play-overlay">▶</span>
               </button>
@@ -168,9 +235,22 @@ export default function Dashboard({ query = "" }) {
                   <span>{v.channel_name || "Unknown channel"}</span>
                   <span>{[v.view_count && v.view_count !== "0" ? formatViews(v.view_count) : "", v.published_at ? new Date(v.published_at).toLocaleDateString() : ""].filter(Boolean).join(" · ")}</span>
                   <div className="youtube-actions always-visible">
-                    <button onClick={() => setPreview({ ...v, source_url: v.url })}>Watch</button>
-                    <button onClick={() => save(v)}>Save</button>
-                    <button onClick={() => download(v)}>Download</button>
+                    <button onClick={() => openPreview({ ...v, source_url: v.url }, displayedVideos)}>Watch</button>
+                    <button className="video-icon-action" onClick={() => save(v)} title="Add to library" aria-label={`Add ${v.title} to library`}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v15l-6-3.5-6 3.5z" /><path d="M12 7v6M9 10h6" /></svg>
+                    </button>
+                    <button className="video-icon-action" onClick={() => download(v)} title="Download" aria-label={`Download ${v.title}`}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 19h16" /></svg>
+                    </button>
+                    <button
+                      className={"video-icon-action" + (isFeedFavorite(v.video_id) ? " is-favorite" : "")}
+                      onClick={() => toggleFeedFavorite(v)}
+                      title="Toggle favourite"
+                      aria-label={`${isFeedFavorite(v.video_id) ? "Remove" : "Add"} ${v.title} ${isFeedFavorite(v.video_id) ? "from" : "to"} favourites`}
+                      aria-pressed={isFeedFavorite(v.video_id)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.7c0 4.2-8.8 10-8.8 10s-8.8-5.8-8.8-10a4.7 4.7 0 0 1 8.8-2.3 4.7 4.7 0 0 1 8.8 2.3Z" /></svg>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -188,7 +268,7 @@ export default function Dashboard({ query = "" }) {
           </button>
         </div>
       )}
-      {preview && <PreviewModal video={preview} onClose={() => setPreview(null)} />}
+      {preview && <PreviewModal video={preview} queue={previewQueue} onClose={() => setPreview(null)} />}
     </section>
   );
 }

@@ -26,6 +26,18 @@ if "channel_id" not in {column["name"] for column in inspect(engine).get_columns
 with engine.begin() as connection:
     connection.exec_driver_sql(
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_channel_id ON subscriptions (channel_id)")
+video_columns = {column["name"] for column in inspect(engine).get_columns("videos")}
+if "history_only" not in video_columns:
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE videos ADD COLUMN history_only BOOLEAN DEFAULT 0")
+watch_columns = {column["name"] for column in inspect(engine).get_columns("watch_history")}
+with engine.begin() as connection:
+    if "progress_seconds" not in watch_columns:
+        connection.exec_driver_sql("ALTER TABLE watch_history ADD COLUMN progress_seconds INTEGER DEFAULT 0")
+    if "duration_seconds" not in watch_columns:
+        connection.exec_driver_sql("ALTER TABLE watch_history ADD COLUMN duration_seconds INTEGER DEFAULT 0")
+    if "completed" not in watch_columns:
+        connection.exec_driver_sql("ALTER TABLE watch_history ADD COLUMN completed BOOLEAN DEFAULT 0")
 with SessionLocal() as _db:       # downloads that were running when the app closed become resumable
     _db.query(DownloadTask).filter(DownloadTask.status.in_(("queued", "downloading"))).update(
         {"status": "paused"}, synchronize_session=False)

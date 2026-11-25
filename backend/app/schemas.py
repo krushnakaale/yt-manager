@@ -16,6 +16,10 @@ class VideoPatch(BaseModel):
     favorite: bool | None = None
 
 
+class VideoFavoriteIn(BaseModel):
+    favorite: bool
+
+
 class PlaylistIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=300)
@@ -50,16 +54,25 @@ class SettingsIn(BaseModel):
     max_download_mb: int | None = Field(default=None, ge=1, le=20000)
     max_concurrent: int | None = Field(default=None, ge=1, le=5)
     yt_api_key: str | None = Field(default=None, max_length=200)  # write-only
+    track_watch_history: bool | None = None
 
 
 class BackupIn(BaseModel):
     version: int = 1
     videos: list[dict] = Field(default_factory=list, max_length=5000)
     playlists: list[dict] = Field(default_factory=list, max_length=500)
+    watch_history: list[dict] = Field(default_factory=list, max_length=5000)
 
 
 class WatchIn(BaseModel):
-    video_id: int
+    video_id: int | None = None
+    youtube_video_id: str | None = Field(default=None, max_length=20)
+    title: str | None = Field(default=None, max_length=300)
+    channel_name: str | None = Field(default=None, max_length=200)
+    thumbnail_url: str | None = Field(default=None, max_length=500)
+    progress_seconds: float = Field(default=0, ge=0, le=604800)
+    duration_seconds: float = Field(default=0, ge=0, le=604800)
+    completed: bool = False
 
 
 class SubscriptionIn(BaseModel):

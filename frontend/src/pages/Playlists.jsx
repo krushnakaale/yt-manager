@@ -28,9 +28,26 @@ export default function Playlists({ arg }) {
   const detail = useLoad(() => (selected ? api.get(`/api/playlists/${selected}`) : Promise.resolve(null)), [selected]);
   const [newPlaylist, setNewPlaylist] = useState({ name: "", description: "" });
   const [draft, setDraft] = useState({ name: "", description: "" });
+  const [playlistView, setPlaylistView] = useState("all");
+  const [playlistQuery, setPlaylistQuery] = useState("");
   const [preview, setPreview] = useState(null);
+  const [previewQueue, setPreviewQueue] = useState([]);
   const [editing, setEditing] = useState(false);
   const playlist = detail.data?.id === selected ? detail.data : null;
+  const visiblePlaylists = (list.data || [])
+    .filter((item) => {
+      const query = playlistQuery.trim().toLowerCase();
+      const matchesQuery = !query || `${item.name} ${item.description}`.toLowerCase().includes(query);
+      return matchesQuery && (playlistView !== "empty" || item.count === 0);
+    })
+    .sort((a, b) => playlistView === "recent"
+      ? new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+      : a.name.localeCompare(b.name));
+  const displayedPlaylists = playlistView === "recent" ? visiblePlaylists.slice(0, 6) : visiblePlaylists;
+  const openPreview = (video) => {
+    setPreview(video);
+    setPreviewQueue(playlist?.videos || []);
+  };
 
   useEffect(() => {
     if (playlist) {
@@ -97,12 +114,33 @@ export default function Playlists({ arg }) {
           <button className="btn primary self-end">Create playlist</button>
         </form>
         {list.data?.length > 0 && <div className="playlist-summary muted">{list.data.length} {list.data.length === 1 ? "playlist" : "playlists"} · {list.data.reduce((total, item) => total + item.count, 0)} videos saved</div>}
+        {list.data?.length > 0 && <>
+          <div className="collection-tabs" role="tablist" aria-label="Playlist sections">
+            {[
+              ["all", "All playlists"],
+              ["recent", "Recently updated"],
+              ["empty", "Empty playlists"],
+            ].map(([value, label]) => (
+              <button key={value} role="tab" aria-selected={playlistView === value}
+                className={playlistView === value ? "active" : ""}
+                onClick={() => setPlaylistView(value)}>{label}</button>
+            ))}
+          </div>
+          <div className="playlist-list-controls">
+            <input value={playlistQuery} onChange={(e) => setPlaylistQuery(e.target.value)}
+              placeholder="Search playlists" aria-label="Search playlists" />
+          </div>
+        </>}
         {list.data && !list.data.length && <Empty title="Your playlists will live here" hint="Create your first playlist, then add saved videos from the Library.">
           <a className="btn" href="#/library">Browse your library</a>
         </Empty>}
+        {list.data?.length > 0 && !displayedPlaylists.length && <Empty
+          title={playlistQuery ? "No playlists match your search" : "No playlists in this section"}
+          hint={playlistQuery ? "Try another playlist name or description." : "Create a playlist or add videos to one from your Library."}
+        />}
         {!list.data && !list.error && <div className="empty"><strong>Loading playlists…</strong></div>}
         <div className="playlist-grid">
-          {list.data?.map((p) => (
+          {displayedPlaylists.map((p) => (
             <a key={p.id} href={`#/playlists/${p.id}`} className="playlist-card">
               <PlaylistCover playlist={p} />
               <div className="playlist-card-body">
@@ -137,7 +175,7 @@ export default function Playlists({ arg }) {
                 <p className="muted">{playlist.description || "A collection of videos saved to your library."}</p>
                 <p className="muted">{playlist.videos.length} {playlist.videos.length === 1 ? "video" : "videos"}{playlist.created_at ? ` · Created ${dateLabel(playlist.created_at)}` : ""}</p>
                 <div className="row wrap">
-                  {playlist.videos.length > 0 && <button className="btn primary" onClick={() => setPreview(playlist.videos[0])}>Play first video</button>}
+                  {playlist.videos.length > 0 && <button className="btn primary" onClick={() => openPreview(playlist.videos[0])}>Play first video</button>}
                   <button className="btn" onClick={() => setEditing(!editing)}>{editing ? "Close editor" : "Edit details"}</button>
                   <button className="btn danger" onClick={del}>Delete playlist</button>
                 </div>
@@ -157,12 +195,12 @@ export default function Playlists({ arg }) {
               {playlist.videos.map((v, i) => (
                 <li className="playlist-video-row" key={v.id}>
                   <span className="playlist-position">{String(i + 1).padStart(2, "0")}</span>
-                  <button className="playlist-item-thumb" onClick={() => setPreview(v)} aria-label={`Play ${v.title}`}>
+                  <button className="playlist-item-thumb" onClick={() => openPreview(v)} aria-label={`Play ${v.title}`}>
                     <img src={v.thumbnail_url} alt="" loading="lazy" referrerPolicy="no-referrer" /><span>▶</span>
                   </button>
                   <div className="playlist-item-copy"><h3 title={v.title}>{v.title}</h3><span className="muted">{v.channel_name || "Unknown channel"}</span></div>
                   <div className="row wrap playlist-item-actions">
-                    <button className="btn" onClick={() => setPreview(v)}>Play</button>
+                    <button className="btn" onClick={() => openPreview(v)}>Play</button>
                     <button className="btn" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move ${v.title} up`}>↑</button>
                     <button className="btn" onClick={() => move(i, 1)} disabled={i === playlist.videos.length - 1} aria-label={`Move ${v.title} down`}>↓</button>
                     <button className="btn danger" onClick={() => remove(v)}>Remove</button>
@@ -173,7 +211,7 @@ export default function Playlists({ arg }) {
           </>}
         </div>
       </div>}
-      {preview && <PreviewModal video={preview} onClose={() => setPreview(null)} />}
+      {preview && <PreviewModal video={preview} queue={previewQueue} onClose={() => setPreview(null)} />}
     </section>
   );
 }

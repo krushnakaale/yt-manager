@@ -26,6 +26,7 @@ export default function Downloads() {
   const [quality, setQuality] = useState("best");
   const [customPath, setCustomPath] = useState("");
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("active");
 
   // Playlist states
   const [isPlaylist, setIsPlaylist] = useState(false);
@@ -35,7 +36,7 @@ export default function Downloads() {
   const [checkingPl, setCheckingPl] = useState(false);
 
   const fileRef = useRef(null);
-  const tasks = useLoad(() => api.get("/api/downloads?status=active"), [], 1000);
+  const tasks = useLoad(() => api.get(`/api/downloads?status=${status}`), [status], status === "active" ? 1000 : 0);
   const settings = useLoad(() => api.get("/api/settings"), []);
 
   const isPlaylistUrl = url.includes("list=") || url.includes("playlist");
@@ -103,9 +104,9 @@ export default function Downloads() {
   };
 
   const chooseFolder = async () => {
-    const p = await window.ytm?.selectFolder();
-    if (!p) return;
     try {
+      const p = await window.ytm?.selectFolder();
+      if (!p) return;
       await api.put("/api/settings", { download_folder: p });
       settings.reload();
       toast("Default download folder updated", "ok");
@@ -115,8 +116,12 @@ export default function Downloads() {
   };
 
   const chooseCustomFolder = async () => {
-    const p = await window.ytm?.selectFolder();
-    if (p) setCustomPath(p);
+    try {
+      const p = await window.ytm?.selectFolder();
+      if (p) setCustomPath(p);
+    } catch (er) {
+      toast(er.message, "danger");
+    }
   };
 
   const upload = async (e) => {
@@ -141,14 +146,14 @@ export default function Downloads() {
   };
 
   return (
-    <section>
-      <h1>Download center</h1>
-      <p className="muted">
-        Download single YouTube videos, whole playlists/ranges, or direct files with custom quality & custom folders.
-      </p>
+    <section className="downloads-page">
+      <header className="download-center-heading">
+        <h1>Download center</h1>
+        <p className="muted">Videos, playlists, or direct files — choose format, quality, and destination.</p>
+      </header>
 
-      <form className="card" onSubmit={start}>
-        <label>
+      <form className="card download-center-form" onSubmit={start}>
+        <label className="download-url-field">
           YouTube video, playlist, or direct file URL
           <input
             type="url"
@@ -161,17 +166,9 @@ export default function Downloads() {
 
         {/* Playlist Detection & Range Options */}
         {isPlaylistUrl && (
-          <div
-            style={{
-              background: "rgba(255, 255, 255, 0.04)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              borderRadius: "8px",
-              padding: "0.8rem 1rem",
-              margin: "0.4rem 0",
-            }}
-          >
-            <div className="row wrap" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 600 }}>🎵 YouTube Playlist Detected</span>
+          <div className="download-playlist-panel">
+            <div className="row wrap download-playlist-heading">
+              <span>YouTube Playlist Detected</span>
               <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", margin: 0 }}>
                 <input
                   type="checkbox"
@@ -183,9 +180,9 @@ export default function Downloads() {
             </div>
 
             {isPlaylist && (
-              <div style={{ marginTop: "0.8rem" }}>
-                <div className="row wrap" style={{ gap: "1rem", alignItems: "flex-end" }}>
-                  <label style={{ flex: 1, minWidth: "110px", margin: 0 }}>
+              <div className="download-playlist-options">
+                <div className="row wrap">
+                  <label>
                     From video #:
                     <input
                       type="number"
@@ -196,7 +193,7 @@ export default function Downloads() {
                       required={isPlaylist}
                     />
                   </label>
-                  <label style={{ flex: 1, minWidth: "110px", margin: 0 }}>
+                  <label>
                     To video #:
                     <input
                       type="number"
@@ -216,7 +213,7 @@ export default function Downloads() {
                   </button>
                 </div>
                 {plInfo && (
-                  <p className="muted" style={{ margin: "0.5rem 0 0 0", fontSize: "0.88rem" }}>
+                  <p className="muted download-playlist-info">
                     Playlist: <strong>{plInfo.title}</strong> ({plInfo.total} total items available)
                   </p>
                 )}
@@ -226,8 +223,8 @@ export default function Downloads() {
         )}
 
         {/* Format Selection (Video vs Music) */}
-        <div className="row wrap" style={{ gap: "1.2rem", alignItems: "center", margin: "0.3rem 0" }}>
-          <span className="muted" style={{ fontWeight: 600 }}>Format:</span>
+        <div className="row wrap download-format">
+          <span className="muted">Format:</span>
           <label style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", cursor: "pointer", margin: 0 }}>
             <input
               type="radio"
@@ -251,8 +248,8 @@ export default function Downloads() {
         </div>
 
         {/* Quality Selection */}
-        <div className="row wrap" style={{ gap: "1rem", alignItems: "center" }}>
-          <label className="grow" style={{ margin: 0 }}>
+        <div className="download-options">
+          <label>
             Quality:
             <select value={quality} onChange={(e) => setQuality(e.target.value)}>
               {(format === "audio" ? AUDIO_QUALITIES : VIDEO_QUALITIES).map((q) => (
@@ -264,7 +261,7 @@ export default function Downloads() {
           </label>
 
           {!isPlaylist && (
-            <label className="grow" style={{ margin: 0 }}>
+            <label>
               Save as (optional):
               <input
                 value={name}
@@ -277,41 +274,45 @@ export default function Downloads() {
         </div>
 
         {/* Custom Folder Path */}
-        <div className="row wrap" style={{ alignItems: "flex-end", gap: "0.5rem", marginTop: "0.3rem" }}>
-          <label className="grow" style={{ margin: 0 }}>
-            Custom destination folder (optional):
+        <div className="download-destination">
+          <label className="download-path-field">
+            <span>Custom destination folder <small>(optional)</small></span>
             <input
               value={customPath}
               onChange={(e) => setCustomPath(e.target.value)}
+              aria-label="Custom destination folder"
               placeholder={`Default: ${settings.data?.download_folder || "Downloads"}`}
             />
           </label>
           {window.ytm && (
-            <button type="button" className="btn" onClick={chooseCustomFolder}>
-              Browse Folder…
+            <button type="button" className="btn download-folder-picker" onClick={chooseCustomFolder}>
+              <span aria-hidden="true">📁</span> Choose custom path
             </button>
           )}
           {customPath && (
-            <button type="button" className="btn" onClick={() => setCustomPath("")}>
-              Clear
+            <button type="button" className="btn" onClick={() => setCustomPath("")} aria-label="Clear custom path">
+              Clear path
             </button>
           )}
+          <span className="download-path-hint">
+            {window.ytm ? "Choose custom path opens your system folder picker." : "Enter a full folder path; browser security does not expose local folder paths."}
+          </span>
         </div>
 
-        <div className="row" style={{ marginTop: "0.5rem" }}>
-          <button className="btn primary" disabled={busy} style={{ minWidth: "160px" }}>
+        <div className="download-submit">
+          <button className="btn primary" disabled={busy}>
             {submitLabel()}
           </button>
         </div>
 
         {/* Folder bar */}
-        <div className="row wrap" style={{ marginTop: "0.6rem", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "0.6rem" }}>
+        <div className="row wrap download-folder-tools">
           <span className="muted grow ell">
             Default folder: <span className="mono">{settings.data?.download_folder ?? "…"}</span>
           </span>
           {window.ytm && (
             <button type="button" className="btn" onClick={chooseFolder}>
-              Change default folder
+              Change default
             </button>
           )}
           {window.ytm && settings.data && (
@@ -320,7 +321,7 @@ export default function Downloads() {
               className="btn"
               onClick={() => window.ytm.openFolder(customPath || settings.data.download_folder)}
             >
-              Open folder
+              Open destination
             </button>
           )}
           <button type="button" className="btn" onClick={() => fileRef.current.click()}>
@@ -330,9 +331,24 @@ export default function Downloads() {
         </div>
       </form>
 
+      <div className="collection-tabs" role="tablist" aria-label="Download sections">
+        {[
+          ["active", "Active"],
+          ["completed", "Completed"],
+          ["failed", "Failed"],
+          ["cancelled", "Cancelled"],
+        ].map(([value, label]) => (
+          <button key={value} role="tab" aria-selected={status === value}
+            className={status === value ? "active" : ""}
+            onClick={() => setStatus(value)}>{label}</button>
+        ))}
+      </div>
       <ErrorNote error={tasks.error} onRetry={tasks.reload} />
       {tasks.data && !tasks.data.length && (
-        <Empty title="No active downloads" hint="Finished ones are listed under History." />
+        <Empty
+          title={status === "active" ? "No active downloads" : `No ${status} downloads`}
+          hint={status === "active" ? "Finished downloads are available in the tabs above or in History." : "Downloads with this status will appear here."}
+        />
       )}
       {tasks.data?.map((t) => (
         <DownloadRow key={t.id} t={t} reload={tasks.reload} />

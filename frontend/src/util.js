@@ -1,5 +1,57 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const SEARCH_HISTORY_KEY = "ytm.search-history";
+const SEARCH_TRACKING_KEY = "ytm.track-search-history";
+const SEARCH_HISTORY_EVENT = "ytm-search-history-change";
+const AUTOPLAY_KEY = "ytm.autoplay";
+
+export function isAutoplayEnabled() {
+  try { return localStorage.getItem(AUTOPLAY_KEY) !== "false"; }
+  catch { return false; }
+}
+
+export function setAutoplayEnabled(enabled) {
+  try { localStorage.setItem(AUTOPLAY_KEY, String(Boolean(enabled))); }
+  catch { /* Autoplay preference is optional when storage is unavailable. */ }
+}
+
+export function isSearchHistoryEnabled() {
+  try { return localStorage.getItem(SEARCH_TRACKING_KEY) !== "false"; }
+  catch { return false; }
+}
+
+export function getSearchHistory() {
+  try {
+    const items = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]");
+    return Array.isArray(items) ? items.filter((item) => typeof item === "string").slice(0, 20) : [];
+  } catch { return []; }
+}
+
+export function recordSearch(query) {
+  const term = query.trim().slice(0, 100);
+  if (!term || !isSearchHistoryEnabled()) return getSearchHistory();
+  const items = [term, ...getSearchHistory().filter((item) => item.toLowerCase() !== term.toLowerCase())].slice(0, 20);
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(items));
+    window.dispatchEvent(new Event(SEARCH_HISTORY_EVENT));
+  } catch { /* Search can continue even when local storage is unavailable. */ }
+  return items;
+}
+
+export function setSearchHistoryEnabled(enabled) {
+  try {
+    localStorage.setItem(SEARCH_TRACKING_KEY, String(Boolean(enabled)));
+    window.dispatchEvent(new Event(SEARCH_HISTORY_EVENT));
+  } catch { /* The preference is device-local and optional. */ }
+}
+
+export function clearSearchHistory() {
+  try {
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+    window.dispatchEvent(new Event(SEARCH_HISTORY_EVENT));
+  } catch { /* The search field remains usable without local history. */ }
+}
+
 export function fmtBytes(n) {
   if (n == null) return "unknown";
   const u = ["B", "KB", "MB", "GB", "TB"];

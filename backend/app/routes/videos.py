@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..config import YT_API_KEY
 from ..database import get_db, get_setting
 from ..models import Video
-from ..schemas import VideoIn, VideoPatch
+from ..schemas import VideoFavoriteIn, VideoIn, VideoPatch
 from ..security import parse_youtube_url, require_token
 from ..youtube import fetch_metadata
 
@@ -26,17 +26,27 @@ def _api_key(db) -> str:
     return get_setting(db, "yt_api_key", "") or YT_API_KEY
 
 
-async def add_video(db: Session, url: str, category="General", tags="", notes="") -> Video:
+async def add_video(db: Session, url: str, category="General", tags="", notes="", favorite=False) -> Video:
     try:
         canonical, vid = parse_youtube_url(url)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if db.query(Video).filter(Video.video_id == vid).first():
+    existing = db.query(Video).filter(Video.video_id == vid).first()
+    if existing and existing.history_only:
+        existing.history_only = False
+        existing.category = (category or "General").strip()[:60] or "General"
+        existing.tags = _clean_tags(tags)
+        existing.notes = notes
+        existing.favorite = favorite
+        db.commit()
+        return existing
+    if existing:
         raise HTTPException(409, "This video is already in your library")
     meta = await fetch_metadata(vid, canonical, _api_key(db))
     v = Video(source_url=canonical, video_id=vid, title=meta["title"] or f"Video {vid}",
               channel_name=meta["channel_name"], thumbnail_url=meta["thumbnail_url"],
-              category=(category or "General").strip()[:60] or "General", tags=_clean_tags(tags), notes=notes)
+              category=(category or "General").strip()[:60] or "General", tags=_clean_tags(tags),
+              notes=notes, favorite=favorite)
     db.add(v)
     db.commit()
     return v
@@ -45,7 +55,7 @@ async def add_video(db: Session, url: str, category="General", tags="", notes=""
 @router.get("/videos")
 def list_videos(q: str = "", category: str = "", favorite: bool = False, sort: str = "newest",
                 db: Session = Depends(get_db)):
-    qs = db.query(Video)
+    qs = db.query(Video).filter(Video.history_only.is_(False))
     if q:
         like = f"%{q.strip()}%"
         qs = qs.filter(or_(Video.title.ilike(like), Video.channel_name.ilike(like),
@@ -61,12 +71,35 @@ def list_videos(q: str = "", category: str = "", favorite: bool = False, sort: s
 
 @router.get("/categories")
 def categories(db: Session = Depends(get_db)):
-    return [c for (c,) in db.query(Video.category).distinct().order_by(Video.category) if c]
+    return [c for (c,) in db.query(Video.category).filter(Video.history_only.is_(False))
+            .distinct().order_by(Video.category) if c]
 
 
 @router.post("/videos", status_code=201)
 async def create_video(body: VideoIn, db: Session = Depends(get_db)):
     return (await add_video(db, body.url, body.category, body.tags, body.notes)).to_dict()
+
+
+@router.put("/videos/youtube/{youtube_id}/favorite")
+async def set_youtube_favorite(youtube_id: str, body: VideoFavoriteIn, db: Session = Depends(get_db)):
+    try:
+        canonical, parsed_id = parse_youtube_url(f"https://youtu.be/{youtube_id}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if parsed_id != youtube_id:
+        raise HTTPException(400, "Invalid YouTube video ID")
+
+    video = db.query(Video).filter(Video.video_id == parsed_id).first()
+    if not video:
+        if not body.favorite:
+            raise HTTPException(404, "Video is not in your library")
+        video = await add_video(db, canonical, favorite=True)
+    else:
+        if body.favorite:
+            video.history_only = False
+        video.favorite = body.favorite
+        db.commit()
+    return video.to_dict()
 
 
 @router.patch("/videos/{vid}")

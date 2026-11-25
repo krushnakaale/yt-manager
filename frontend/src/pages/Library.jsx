@@ -63,7 +63,7 @@ export default function Library() {
   const { toast, confirm } = useUI();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
-  const [favorite, setFavorite] = useState(false);
+  const [librarySection, setLibrarySection] = useState("all");
   const [sort, setSort] = useState("newest");
   const [links, setLinks] = useState("");
   const [cat, setCat] = useState("General");
@@ -72,14 +72,21 @@ export default function Library() {
   const [showAddLinks, setShowAddLinks] = useState(false);
   const [showYT, setShowYT] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [previewQueue, setPreviewQueue] = useState([]);
   const [edit, setEdit] = useState(null);
 
+  const favorite = librarySection === "favorites";
   const params = new URLSearchParams({ q, category, sort, favorite });
   const vids = useLoad(() => api.get(`/api/videos?${params}`), [q, category, favorite, sort]);
   const cats = useLoad(() => api.get("/api/categories"), []);
   const pls = useLoad(() => api.get("/api/playlists"), []);
   const subscriptions = useLoad(() => api.get("/api/subscriptions"), []);
   const stats = useLoad(() => api.get("/api/stats"), []);
+  const visibleVideos = librarySection === "recent" ? (vids.data || []).slice(0, 12) : (vids.data || []);
+  const openPreview = (video) => {
+    setPreview(video);
+    setPreviewQueue(visibleVideos);
+  };
   const reloadAll = () => { vids.reload(); cats.reload(); stats.reload(); };
   const toggleSubscription = async (channelName) => {
     if (!channelName) return;
@@ -183,12 +190,25 @@ export default function Library() {
         <datalist id="cats">{cats.data?.map((c) => <option key={c} value={c} />)}</datalist>
       </form>}
 
+      <div className="collection-tabs" role="tablist" aria-label="Library sections">
+        {[
+          ["all", "All videos"],
+          ["favorites", "Favourites"],
+          ["recent", "Recently added"],
+        ].map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={librarySection === id}
+            className={librarySection === id ? "active" : ""}
+            onClick={() => { setLibrarySection(id); if (id === "recent") setSort("newest"); }}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="library-controls">
         <input id="lib-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your saved videos" aria-label="Search library" />
         <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
           <option value="">All categories</option>{cats.data?.map((c) => <option key={c}>{c}</option>)}
         </select>
-        <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+        <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort" disabled={librarySection === "recent"}>
           <option value="newest">Recently added</option><option value="oldest">Oldest added</option>
           <option value="title">Title A–Z</option><option value="channel">Channel A–Z</option>
         </select>
@@ -198,21 +218,25 @@ export default function Library() {
       </div>
       <ErrorNote error={vids.error} onRetry={vids.reload} />
       <div className="library-results">
-        <strong>{vids.data ? `${vids.data.length} ${vids.data.length === 1 ? "video" : "videos"}` : "Loading library…"}</strong>
+        <strong>{vids.data
+          ? librarySection === "recent" && vids.data.length > visibleVideos.length
+            ? `Showing ${visibleVideos.length} of ${vids.data.length} videos`
+            : `${visibleVideos.length} ${visibleVideos.length === 1 ? "video" : "videos"}`
+          : "Loading library…"}</strong>
         {category && <span className="chip">{category}</span>}
         {favorite && <span className="chip alt">Favourites</span>}
       </div>
 
-      {vids.data && !vids.data.length && (
+      {vids.data && !visibleVideos.length && (
         <Empty title={q || category || favorite ? "No videos match these filters" : "Your library is empty"}
                hint={q || category || favorite ? "Clear a filter to see more." : "Add a video link or find a video on YouTube to get started."}>
           {!q && !category && !favorite && <div className="row wrap"><button className="btn primary" onClick={() => setShowAddLinks(true)}>Add videos</button><button className="btn" onClick={() => setShowYT(true)}>Find videos</button></div>}
         </Empty>
       )}
       <div className="library-grid">
-        {vids.data?.map((v) => (
+        {visibleVideos.map((v) => (
           <article className="library-card" key={v.id}>
-            <button className="library-thumb" onClick={() => setPreview(v)} aria-label={`Play ${v.title}`}>
+            <button className="library-thumb" onClick={() => openPreview(v)} aria-label={`Play ${v.title}`}>
               <img src={v.thumbnail_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
               <span className="library-play-overlay">▶ Play</span>
               {v.favorite && <span className="library-favourite-badge">★ Favourite</span>}
@@ -236,7 +260,7 @@ export default function Library() {
                 {subscriptions.data?.some((s) => s.channel_name === v.channel_name) ? "Subscribed" : "Subscribe to channel"}
               </button>}
               <div className="row wrap library-card-actions">
-                <button className="btn primary" onClick={() => setPreview(v)}>Play</button>
+                <button className="btn primary" onClick={() => openPreview(v)}>Play</button>
                 <button className="btn" onClick={() => downloadVideo(v, "video")}>🎬 Video</button>
                 <button className="btn" onClick={() => downloadVideo(v, "audio")}>🎵 MP3</button>
                 <button className="btn" onClick={() => setEdit(v)}>Edit details</button>
@@ -249,7 +273,7 @@ export default function Library() {
           </article>
         ))}
       </div>
-      {preview && <PreviewModal video={preview} onClose={() => setPreview(null)} />}
+      {preview && <PreviewModal video={preview} queue={previewQueue} onClose={() => setPreview(null)} />}
       {edit && <EditModal video={edit} onClose={() => setEdit(null)} onSaved={reloadAll} />}
     </section>
   );

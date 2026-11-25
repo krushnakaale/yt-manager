@@ -20,6 +20,7 @@ class Video(Base):
     tags = Column(String(300), default="")
     notes = Column(Text, default="")
     favorite = Column(Boolean, default=False)
+    history_only = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
     def to_dict(self):
@@ -28,7 +29,8 @@ class Video(Base):
             "title": self.title, "thumbnail_url": self.thumbnail_url,
             "channel_name": self.channel_name, "category": self.category,
             "tags": [t for t in (self.tags or "").split(",") if t], "notes": self.notes or "",
-            "favorite": bool(self.favorite), "created_at": iso(self.created_at),
+            "favorite": bool(self.favorite), "history_only": bool(self.history_only),
+            "created_at": iso(self.created_at),
         }
 
 
@@ -97,6 +99,9 @@ class WatchHistory(Base):
     id = Column(Integer, primary_key=True)
     video_id = Column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     watched_at = Column(DateTime, default=utcnow)
+    progress_seconds = Column(Integer, default=0)
+    duration_seconds = Column(Integer, default=0)
+    completed = Column(Boolean, default=False)
     video = relationship("Video")
 
 

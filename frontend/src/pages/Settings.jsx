@@ -1,6 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
-import { fmtBytes, isElectron, useLoad } from "../util.js";
+import {
+  clearSearchHistory, fmtBytes, getSearchHistory, isAutoplayEnabled, isElectron,
+  isSearchHistoryEnabled, setAutoplayEnabled, setSearchHistoryEnabled, useLoad,
+} from "../util.js";
 import { NEON_ACCENTS, PRESETS, contrast, cssVars, resolve } from "../theme.js";
 import { useUI } from "../ui.jsx";
 
@@ -175,19 +178,101 @@ function Connection() {
   );
 }
 
+function Playback() {
+  const { toast } = useUI();
+  const [autoPlay, setAutoPlay] = useState(isAutoplayEnabled);
+  const toggle = (enabled) => {
+    setAutoplayEnabled(enabled);
+    setAutoPlay(enabled);
+    toast(enabled ? "Autoplay enabled" : "Autoplay disabled", "ok");
+  };
+  return (
+    <div className="card">
+      <h2>Playback</h2>
+      <label className="check privacy-toggle">
+        <input type="checkbox" checked={autoPlay} onChange={(e) => toggle(e.target.checked)} />
+        <span><strong>Automatically play next video</strong><small>When a video ends, play the next item in the current feed, library, playlist, or watch-history list. This preference is saved on this device.</small></span>
+      </label>
+    </div>
+  );
+}
+
+function Privacy() {
+  const { toast, confirm } = useUI();
+  const settings = useLoad(() => api.get("/api/settings"), []);
+  const [trackSearchHistory, setTrackSearchHistory] = useState(isSearchHistoryEnabled);
+  const [searchCount, setSearchCount] = useState(() => getSearchHistory().length);
+  const [savingWatchHistory, setSavingWatchHistory] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      setTrackSearchHistory(isSearchHistoryEnabled());
+      setSearchCount(getSearchHistory().length);
+    };
+    window.addEventListener("ytm-search-history-change", sync);
+    return () => window.removeEventListener("ytm-search-history-change", sync);
+  }, []);
+
+  const toggleSearchHistory = (enabled) => {
+    setSearchHistoryEnabled(enabled);
+    setTrackSearchHistory(enabled);
+    toast(enabled ? "Search history suggestions enabled" : "Search history suggestions disabled", "ok");
+  };
+  const clearSearches = async () => {
+    if (!(await confirm("Clear all saved search queries on this device?", "Clear search history", true))) return;
+    clearSearchHistory();
+    setSearchCount(0);
+    toast("Search history cleared", "ok");
+  };
+  const toggleWatchHistory = async (enabled) => {
+    setSavingWatchHistory(true);
+    try {
+      await api.put("/api/settings", { track_watch_history: enabled });
+      await settings.reload();
+      toast(enabled ? "Watch history tracking enabled" : "Watch history tracking disabled", "ok");
+    } catch (e) {
+      toast(e.message, "danger");
+    } finally {
+      setSavingWatchHistory(false);
+    }
+  };
+
+  return (
+    <div className="card privacy-settings">
+      <h2>Privacy</h2>
+      <label className="check privacy-toggle">
+        <input type="checkbox" checked={trackSearchHistory} onChange={(e) => toggleSearchHistory(e.target.checked)} />
+        <span><strong>Save search history</strong><small>Show recent searches while the search box is focused. Turning this off stops new saves; existing searches stay until cleared.</small></span>
+      </label>
+      <div className="row end privacy-action">
+        <span className="muted grow">{searchCount} saved searches</span>
+        <button className="btn" disabled={!searchCount} onClick={clearSearches}>Clear search history</button>
+      </div>
+      <label className="check privacy-toggle">
+        <input
+          type="checkbox"
+          checked={settings.data?.track_watch_history ?? true}
+          disabled={!settings.data || savingWatchHistory}
+          onChange={(e) => toggleWatchHistory(e.target.checked)}
+        />
+        <span><strong>Track watch history and playback progress</strong><small>When off, new videos and progress are not saved. Existing history is kept until cleared from History.</small></span>
+      </label>
+      <p className="muted privacy-disclosure">Your library and playlists stay on this device. Requests to YouTube are used for video metadata, thumbnails, the embedded player, and URLs you choose to download. There are no ads or analytics.</p>
+    </div>
+  );
+}
+
 export default function Settings(props) {
   return (
-    <section>
+    <section className="settings-page">
       <h1>Settings</h1>
       <Appearance {...props} />
       <Downloads />
       <YouTubeApi />
       <Backup />
+      <Playback />
       {!isElectron() && <Connection />}
-      <div className="card">
-        <h2>Privacy</h2>
-        <p className="muted">Your library, playlists and history stay on this device. The only outside requests are: YouTube oEmbed or Data API (titles, channels, thumbnails), YouTube thumbnails and the embedded player when you press Preview, and the file URLs you choose to download. There are no ads or analytics.</p>
-      </div>
+      <Privacy />
     </section>
   );
 }
