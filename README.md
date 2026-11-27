@@ -1,4 +1,6 @@
-# YT Manager
+# YT Manager — Video Library, Playlist and Download Manager
+
+Organize video links, playlists and watch history across Windows, Android and browser interfaces. Download only content you own or have permission to download.
 
 ## Your video library, organized your way
 
